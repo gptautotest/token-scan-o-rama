@@ -158,40 +158,90 @@ class WebSocketService {
   
   public async fetchTokenByMint(mint: string): Promise<Token | null> {
     try {
-      let token: Token = { mint };
-      
-      const solscanInfo = await this.fetchTokenInfo(mint);
-      if (solscanInfo) {
-        token = { ...token, ...solscanInfo };
+      // Validate Solana address format (base58 encoded, typically 32-44 characters)
+      if (!mint || mint.length < 32 || mint.length > 44) {
+        console.warn("Invalid Solana address format:", mint);
       }
       
+      console.log("Fetching token by mint address:", mint);
+      
+      let token: Token = { mint };
+      
+      // Fetch token information from SolScan
       try {
+        console.log("Fetching data from SolScan API");
+        const solscanInfo = await this.fetchTokenInfo(mint);
+        if (solscanInfo) {
+          token = { ...token, ...solscanInfo };
+          console.log("Retrieved SolScan data:", solscanInfo);
+        }
+      } catch (error) {
+        console.error("Error fetching from SolScan:", error);
+      }
+      
+      // Fetch price information
+      try {
+        console.log("Fetching price history");
         const priceInfo = await this.fetchTokenPriceHistory(mint);
         if (priceInfo && priceInfo.length > 0) {
           token.price = priceInfo[priceInfo.length - 1].price;
           token.priceHistory = priceInfo;
+          console.log("Retrieved price history with", priceInfo.length, "data points");
         }
       } catch (error) {
         console.error("Error fetching price info:", error);
       }
       
+      // Try to get additional pump.fun data if available
       try {
-        const metadataPDA = await this.getTokenMetadataPDA(mint);
-        if (metadataPDA) {
-          const metadata = await this.getTokenMetadata(metadataPDA);
-          if (metadata && metadata.uri) {
-            token.uri = metadata.uri;
-            const enrichedToken = await this.fetchTokenMetadata(token);
-            token = { ...token, ...enrichedToken };
-          }
+        console.log("Fetching pump.fun data");
+        const pumpFunData = await this.fetchPumpFunData(mint);
+        if (pumpFunData) {
+          token = { ...token, ...pumpFunData };
+          console.log("Retrieved pump.fun data");
         }
       } catch (error) {
-        console.error("Error fetching token metadata:", error);
+        console.error("Error fetching pump.fun data:", error);
       }
       
-      return token;
+      // If we have a token name/symbol, consider it valid
+      if (token.name || token.symbol) {
+        console.log("Successfully retrieved token data:", token.name || token.symbol);
+        return token;
+      } else {
+        console.log("No token data found for mint:", mint);
+        return null;
+      }
     } catch (error) {
-      console.error("Error fetching token by mint:", error);
+      console.error("Error in fetchTokenByMint:", error);
+      return null;
+    }
+  }
+  
+  private async fetchPumpFunData(mint: string): Promise<Partial<Token> | null> {
+    try {
+      // This is a placeholder for pump.fun API integration
+      // In a real implementation, you would fetch from the pump.fun API
+      // For now, we'll check if the token name contains "pump" in the solscan data
+      
+      const response = await fetch(`https://api.pumpfun.com/api/v1/token/${mint}`);
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          name: data.name,
+          symbol: data.symbol,
+          pumpInfo: {
+            creator: data.creator,
+            description: data.description,
+            website: data.website,
+            twitter: data.twitter
+          }
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.log("No pump.fun data available or error:", error);
       return null;
     }
   }

@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import TokenGrid from '@/components/TokenGrid';
 import ChartModal from '@/components/ChartModal';
@@ -17,36 +16,26 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   useEffect(() => {
-    // Subscribe to WebSocket status changes
     const unsubscribeStatus = websocketService.onStatusChange((status) => {
       setConnectionStatus(status);
     });
     
-    // Subscribe to new tokens
     const unsubscribeTokens = websocketService.onNewToken((token) => {
       setTokens((prevTokens) => {
-        // Check if token already exists
         const exists = prevTokens.some(t => t.mint === token.mint);
         if (exists) {
-          // Update existing token
           return prevTokens.map(t => 
             t.mint === token.mint ? { ...t, ...token } : t
           );
         }
-        
-        // Add new token to the beginning of the array
         const newTokens = [token, ...prevTokens];
-        
-        // Limit to 50 tokens for performance
         if (newTokens.length > 50) {
           return newTokens.slice(0, 50);
         }
-        
         return newTokens;
       });
     });
     
-    // Cleanup subscriptions on unmount
     return () => {
       unsubscribeStatus();
       unsubscribeTokens();
@@ -62,7 +51,8 @@ const Index = () => {
   };
 
   const handleFetchToken = async () => {
-    if (!mintAddress.trim()) {
+    const trimmedAddress = mintAddress.trim();
+    if (!trimmedAddress) {
       toast({
         title: "Ошибка",
         description: "Пожалуйста, введите адрес токена",
@@ -71,11 +61,21 @@ const Index = () => {
       return;
     }
 
+    if (trimmedAddress.length < 32 || trimmedAddress.length > 44) {
+      toast({
+        title: "Некорректный формат",
+        description: "Адрес токена Solana должен быть от 32 до 44 символов",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const token = await websocketService.fetchTokenByMint(mintAddress.trim());
+      console.log("Fetching token data for:", trimmedAddress);
+      const token = await websocketService.fetchTokenByMint(trimmedAddress);
+      
       if (token) {
-        // Добавляем/обновляем токен в список
         setTokens((prevTokens) => {
           const exists = prevTokens.some(t => t.mint === token.mint);
           if (exists) {
@@ -86,12 +86,11 @@ const Index = () => {
           return [token, ...prevTokens];
         });
         
-        // Показываем информацию о токене
         setSelectedToken(token);
         
         toast({
           title: "Успех",
-          description: `Информация о токене ${token.name || token.symbol || 'Unknown'} получена`,
+          description: `Информация о токене ${token.name || token.symbol || token.mint.substring(0, 8)} получена`,
         });
       } else {
         toast({
