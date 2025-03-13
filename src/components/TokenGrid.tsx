@@ -21,7 +21,7 @@ const TokenGrid: React.FC<TokenGridProps> = ({ tokens, onTokenSelect }) => {
       
       {tokens.length === 0 && (
         <div className="col-span-full min-h-[300px] flex items-center justify-center text-muted-foreground">
-          Waiting for new tokens...
+          Ожидание новых токенов...
         </div>
       )}
     </div>

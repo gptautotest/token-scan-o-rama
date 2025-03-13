@@ -18,48 +18,34 @@ const ChartModal: React.FC<ChartModalProps> = ({ token, onClose }) => {
   const chartInstance = useRef<Chart | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Function to create sample data - in real implementation, fetch from API
-  const generateSampleData = () => {
-    const now = new Date();
-    const hours = Array.from({ length: 24 }, (_, i) => {
-      const d = new Date(now);
-      d.setHours(now.getHours() - 24 + i);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    });
-    
-    // Create some sample price movements
-    const startPrice = token?.price || token?.initialBuy || 0.1;
-    const prices = [startPrice];
-    
-    for (let i = 1; i < 24; i++) {
-      const change = (Math.random() - 0.5) * 0.2; // Random change between -10% and +10%
-      const newPrice = prices[i-1] * (1 + change);
-      prices.push(Math.max(0.00001, newPrice)); // Ensure price doesn't go negative
-    }
-    
-    return { hours, prices };
-  };
-
   useEffect(() => {
     if (!token || !chartRef.current) return;
     
     setIsLoading(true);
     
-    // Simulate data loading
-    const timeout = setTimeout(() => {
-      if (chartInstance.current) {
-        chartInstance.current.destroy();
-      }
-      
-      const { hours, prices } = generateSampleData();
-      
-      const ctx = chartRef.current.getContext('2d');
+    // Cleanup previous chart
+    if (chartInstance.current) {
+      chartInstance.current.destroy();
+    }
+    
+    setTimeout(() => {
+      const ctx = chartRef.current?.getContext('2d');
       if (!ctx) return;
+      
+      // Use real price history if available, otherwise generate sample data
+      const priceData = token.priceHistory || generateSampleData(token);
+      
+      const labels = priceData.map(point => {
+        const date = new Date(point.timestamp);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      });
+      
+      const prices = priceData.map(point => point.price);
       
       chartInstance.current = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: hours,
+          labels,
           datasets: [{
             label: `Price (SOL)`,
             data: prices,
@@ -125,13 +111,33 @@ const ChartModal: React.FC<ChartModalProps> = ({ token, onClose }) => {
     }, 500);
     
     return () => {
-      clearTimeout(timeout);
       if (chartInstance.current) {
         chartInstance.current.destroy();
         chartInstance.current = null;
       }
     };
   }, [token]);
+
+  // Function to generate sample data if real data is not available
+  const generateSampleData = (token: Token) => {
+    const now = Date.now();
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    const points = 24; // One point per hour
+    
+    // Create random price points based on the current price
+    const priceData = [];
+    const basePrice = token?.price || token?.initialBuy || 0.1;
+    
+    for (let i = 0; i < points; i++) {
+      const timestamp = oneDayAgo + (i * 60 * 60 * 1000);
+      // Random price fluctuation
+      const randomFactor = 0.8 + Math.random() * 0.4; // Between 0.8 and 1.2
+      const price = basePrice * randomFactor;
+      priceData.push({ timestamp, price });
+    }
+    
+    return priceData;
+  };
 
   if (!token) return null;
 
@@ -221,6 +227,39 @@ const ChartModal: React.FC<ChartModalProps> = ({ token, onClose }) => {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Created:</span>
                   <span>{token.createdAt ? new Date(token.createdAt).toLocaleDateString() : 'Unknown'}</span>
+                </div>
+                
+                {token.pumpInfo?.description && (
+                  <div className="pt-2">
+                    <span className="text-muted-foreground">Description:</span>
+                    <p className="mt-1 text-xs">{token.pumpInfo.description}</p>
+                  </div>
+                )}
+                
+                <div className="pt-2 flex flex-wrap gap-2">
+                  {token.pumpInfo?.twitter && (
+                    <a
+                      href={token.pumpInfo.twitter}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs px-2 py-1 bg-primary/10 text-primary rounded hover:bg-primary/20 transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Twitter
+                    </a>
+                  )}
+                  
+                  {token.pumpInfo?.website && (
+                    <a
+                      href={token.pumpInfo.website}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs px-2 py-1 bg-primary/10 text-primary rounded hover:bg-primary/20 transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Website
+                    </a>
+                  )}
                 </div>
               </div>
             </div>
