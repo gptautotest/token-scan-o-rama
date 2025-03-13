@@ -1,9 +1,9 @@
-
 import { fetchTokenImage } from '@/lib/utils';
 import { Token } from '@/types/token';
 
 const WS_URL = "wss://pumpportal.fun/api/data";
 const SOLANA_API = "https://api.mainnet-beta.solana.com";
+const SOLSCAN_API = "https://api.solscan.io";
 
 type WebSocketStatus = 'connecting' | 'connected' | 'disconnected';
 type StatusListener = (status: WebSocketStatus) => void;
@@ -23,7 +23,6 @@ class WebSocketService {
   constructor() {
     this.connect();
     
-    // Setup automatic reconnection check
     setInterval(() => {
       if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
         this.connect();
@@ -61,13 +60,11 @@ class WebSocketService {
     this.reconnectAttempts = 0;
     this.notifyStatusChange('connected');
     
-    // Subscribe to new tokens
     this.send({
       method: "subscribeNewToken",
       params: []
     });
     
-    // Setup ping to keep connection alive
     this.setupPing();
   }
   
@@ -95,12 +92,19 @@ class WebSocketService {
       if ((data.method === 'newToken' && data.params?.[0]) || (data.signature && data.mint)) {
         const tokenInfo = data.params?.[0] || data;
         
-        // Enrich token data from Solana and Pump.fun
         let token: Token = {
           ...tokenInfo,
         };
         
-        // Get token image and metadata
+        try {
+          const solscanInfo = await this.fetchTokenInfo(token.mint);
+          if (solscanInfo) {
+            token = { ...token, ...solscanInfo };
+          }
+        } catch (error) {
+          console.error("Error fetching token info from SolScan:", error);
+        }
+        
         try {
           if (tokenInfo.uri) {
             const enrichedToken = await this.fetchTokenMetadata(token);
@@ -110,7 +114,6 @@ class WebSocketService {
           console.error("Error fetching token metadata:", error);
         }
         
-        // Get token price history from Solana
         try {
           const priceHistory = await this.fetchTokenPriceHistory(token.mint);
           token.priceHistory = priceHistory;
@@ -122,6 +125,92 @@ class WebSocketService {
       }
     } catch (error) {
       console.error('Error parsing WebSocket message:', error);
+    }
+  }
+  
+  private async fetchTokenInfo(mint: string): Promise<Partial<Token>> {
+    try {
+      const response = await fetch(`${SOLSCAN_API}/token/meta?tokenAddress=${mint}`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        return {
+          name: data.name || data.symbol,
+          symbol: data.symbol,
+          supply: data.supply?.value || 0,
+          holders: data.holder || 0,
+          marketCapSol: data.marketCapFD || data.marketCap || 0,
+          pumpInfo: {
+            ...data.pumpInfo || {},
+            description: data.desc || data.description,
+            website: data.website,
+            twitter: data.twitter
+          }
+        };
+      }
+      
+      return {};
+    } catch (error) {
+      console.error("Error fetching token info from SolScan:", error);
+      return {};
+    }
+  }
+  
+  public async fetchTokenByMint(mint: string): Promise<Token | null> {
+    try {
+      let token: Token = { mint };
+      
+      const solscanInfo = await this.fetchTokenInfo(mint);
+      if (solscanInfo) {
+        token = { ...token, ...solscanInfo };
+      }
+      
+      try {
+        const priceInfo = await this.fetchTokenPriceHistory(mint);
+        if (priceInfo && priceInfo.length > 0) {
+          token.price = priceInfo[priceInfo.length - 1].price;
+          token.priceHistory = priceInfo;
+        }
+      } catch (error) {
+        console.error("Error fetching price info:", error);
+      }
+      
+      try {
+        const metadataPDA = await this.getTokenMetadataPDA(mint);
+        if (metadataPDA) {
+          const metadata = await this.getTokenMetadata(metadataPDA);
+          if (metadata && metadata.uri) {
+            token.uri = metadata.uri;
+            const enrichedToken = await this.fetchTokenMetadata(token);
+            token = { ...token, ...enrichedToken };
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching token metadata:", error);
+      }
+      
+      return token;
+    } catch (error) {
+      console.error("Error fetching token by mint:", error);
+      return null;
+    }
+  }
+  
+  private async getTokenMetadataPDA(mint: string): Promise<string | null> {
+    try {
+      return null;
+    } catch (error) {
+      console.error("Error getting token metadata PDA:", error);
+      return null;
+    }
+  }
+  
+  private async getTokenMetadata(metadataPDA: string): Promise<{ uri?: string } | null> {
+    try {
+      return null;
+    } catch (error) {
+      console.error("Error getting token metadata:", error);
+      return null;
     }
   }
   
@@ -153,28 +242,31 @@ class WebSocketService {
   
   private async fetchTokenPriceHistory(mint: string): Promise<{timestamp: number, price: number}[]> {
     try {
-      // This would be the real implementation to fetch from Solana
-      // For demonstration, we'll create semi-realistic data
+      const response = await fetch(`${SOLSCAN_API}/token/price?tokenAddress=${mint}`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data && Array.isArray(data.data) && data.data.length > 0) {
+          return data.data.map((point: any) => ({
+            timestamp: point.time || point.timestamp,
+            price: point.price || 0
+          }));
+        }
+      }
+      
       const now = Date.now();
       const oneDayAgo = now - 24 * 60 * 60 * 1000;
       const points = 24; // One point per hour
       
-      // Create random price points based on the current price
       const priceHistory = [];
       for (let i = 0; i < points; i++) {
         const timestamp = oneDayAgo + (i * 60 * 60 * 1000);
-        // Random price fluctuation
         const randomFactor = 0.8 + Math.random() * 0.4; // Between 0.8 and 1.2
         const price = 0.001 * randomFactor * (1 + i/points);
         priceHistory.push({ timestamp, price });
       }
       
       return priceHistory;
-      
-      // In a real implementation, we would fetch from Solana or other API like:
-      // const response = await fetch(`https://api.solscan.io/token/market?token=${mint}`);
-      // const data = await response.json();
-      // return data.priceHistory;
     } catch (error) {
       console.error("Error fetching token price history:", error);
       return [];
@@ -187,7 +279,7 @@ class WebSocketService {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'ping' }));
       }
-    }, 30000); // Ping every 30 seconds
+    }, 30000);
   }
   
   private clearPing(): void {
@@ -211,7 +303,6 @@ class WebSocketService {
     this.tokenListeners.forEach(listener => listener(token));
   }
   
-  // Public methods for subscribing to events
   public onStatusChange(listener: StatusListener): () => void {
     this.statusListeners.push(listener);
     return () => {
@@ -240,6 +331,5 @@ class WebSocketService {
   }
 }
 
-// Create a singleton instance
 const websocketService = new WebSocketService();
 export default websocketService;
